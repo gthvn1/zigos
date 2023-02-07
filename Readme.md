@@ -26,6 +26,7 @@ The goal is to
  - [X] boot
  - [X] print message (tagged "step1_banner")
  - [ ] switch to long mode (not sure yet about steps)
+    - [X] introduce some opcodes
     - [ ] setup gdt ???
     - [ ] setup interrupt vector
     - [ ] setup page table
