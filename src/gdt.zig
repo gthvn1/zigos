@@ -15,6 +15,8 @@
 //
 // When Setup interruptions must be turned off (CLI)
 // The access bytes meaning is related to the kind of the segement.
+//
+// GDTR (GDT register) as a size and an offset.
 
 const AccessByte = packed struct {
     a: u1, // Accessed bit
@@ -54,7 +56,11 @@ pub fn makeGDTEntry(limit: u32, base: u32, ab: AccessByte, fb: FlagsByte) GDTEnt
     };
 }
 
-const KERNEL_CODE = AccessByte{
+// Let's define the 32-bits segment descriptors as explained in
+// https://wiki.osdev.org/GDT_Tutorial#How_to_Set_Up_The_GDT
+
+// Kernel code access byte: 0x9A -> 1001_1010
+const KC_AB = AccessByte{
     .a = 0,
     .rw = 1, // Read access is allowed
     .dc = 0, // Can only be executed for DPL == 0
@@ -64,7 +70,8 @@ const KERNEL_CODE = AccessByte{
     .p = 1, // Valid segment
 };
 
-const KERNEL_DATA = AccessByte{
+// Kernel data access byte: 0x92 -> 1001_0010
+const KD_AB = AccessByte{
     .a = 0,
     .rw = 1, // Write access is allowed
     .dc = 0, // Segments grows up
@@ -74,17 +81,19 @@ const KERNEL_DATA = AccessByte{
     .p = 1,
 };
 
-const USER_CODE = AccessByte{
+// User code access byte: 0xFA -> 1111_1010
+const UC_AB = AccessByte{
     .a = 0,
     .rw = 1, // Read access is allowed
     .dc = 0, // Can only be executed for DPL <= 3
     .e = 1, // Define code segment
     .s = 1, // Define code or data segment
-    .dpl = 3, // Descriptor Privilege level
-    .p = 1, // Valid segment
+    .dpl = 3,
+    .p = 1,
 };
 
-const USER_DATA = AccessByte{
+// User data access byte: 0xF2 -> 1111_0010
+const UD_AB = AccessByte{
     .a = 0,
     .rw = 1, // Write access is allowed
     .dc = 0, // Segments grows up
@@ -94,6 +103,18 @@ const USER_DATA = AccessByte{
     .p = 1,
 };
 
+// Task State access byte: 0x89 -> 1000_1001
+const TSS_AB = AccessByte{
+    .a = 1,
+    .rw = 0, // read access not allowed
+    .dc = 0, // can only be executed from the ring set in DPL
+    .e = 1, // can be executed
+    .s = 0, // System segment
+    .dpl = 0,
+    .p = 1,
+};
+
+// Same flags is used for all but TSS : 0xC -> 1100
 const FLAGS = FlagsByte{
     .r = 0,
     .l = 0, // 32-bit mode
@@ -104,9 +125,10 @@ const FLAGS = FlagsByte{
 // Declare our GDT.
 // First entry must be NULL
 var gdt = []GDTEntry{
-    makeGDTEntry(0, 0, 0, 0),
-    makeGDTEntry(0, 0xFFFF, KERNEL_CODE, FLAGS),
-    makeGDTEntry(0, 0xFFFF, KERNEL_DATA, FLAGS),
-    makeGDTEntry(0, 0xFFFF, USER_CODE, FLAGS),
-    makeGDTEntry(0, 0xFFFF, USER_DATA, FLAGS),
+    makeGDTEntry(0x0, 0x0, 0x0, 0x0),
+    makeGDTEntry(0x0, 0xFFFF, KC_AB, FLAGS), // offset: 0x8
+    makeGDTEntry(0x0, 0xFFFF, KD_AB, FLAGS), // offset: 0x10
+    makeGDTEntry(0x0, 0xFFFF, UC_AB, FLAGS), // offset: 0x18
+    makeGDTEntry(0x0, 0xFFFF, UD_AB, FLAGS), // offset: 0x20
+    makeGDTEntry(0x0, 0x0, TSS_AB, 0x0), // limit & base will be set later
 };
