@@ -17,6 +17,7 @@
 // The access bytes meaning is related to the kind of the segement.
 //
 // GDTR (GDT register) as a size and an offset.
+const tty = @import("tty.zig");
 
 const AccessByte = packed struct {
     a: u1, // Accessed bit
@@ -51,6 +52,7 @@ pub fn makeGDTEntry(limit: u32, base: u32, ab: AccessByte, fb: FlagsByte) GDTEnt
         .base_low = @truncate(u16, base),
         .base_mid = @truncate(u8, base >> 16),
         .access = ab,
+        .limit_hi = @truncate(u4, limit >> 16),
         .flags = fb,
         .base_hi = @truncate(u8, base >> 24),
     };
@@ -114,6 +116,16 @@ const TSS_AB = AccessByte{
     .p = 1,
 };
 
+const NULL_AB = AccessByte{
+    .a = 0,
+    .rw = 0,
+    .dc = 0,
+    .e = 0,
+    .s = 0,
+    .dpl = 0,
+    .p = 0,
+};
+
 // Same flags is used for all but TSS : 0xC -> 1100
 const FLAGS = FlagsByte{
     .r = 0,
@@ -122,13 +134,40 @@ const FLAGS = FlagsByte{
     .g = 1, // Limit is in 4KB (page granularity)
 };
 
+const NULL_FLAGS = FlagsByte{
+    .r = 0,
+    .l = 0,
+    .db = 0,
+    .g = 0,
+};
+
 // Declare our GDT.
 // First entry must be NULL
-var gdt = []GDTEntry{
-    makeGDTEntry(0x0, 0x0, 0x0, 0x0),
+var gdt = [_]GDTEntry{
+    makeGDTEntry(0x0, 0x0000, NULL_AB, NULL_FLAGS),
     makeGDTEntry(0x0, 0xFFFF, KC_AB, FLAGS), // offset: 0x8
     makeGDTEntry(0x0, 0xFFFF, KD_AB, FLAGS), // offset: 0x10
     makeGDTEntry(0x0, 0xFFFF, UC_AB, FLAGS), // offset: 0x18
     makeGDTEntry(0x0, 0xFFFF, UD_AB, FLAGS), // offset: 0x20
-    makeGDTEntry(0x0, 0x0, TSS_AB, 0x0), // limit & base will be set later
+    makeGDTEntry(0x0, 0x0000, TSS_AB, NULL_FLAGS), // limit & base will be set later
 };
+
+const GDTRegister = packed struct {
+    limit: u16,
+    base: *const GDTEntry,
+};
+
+var gdtr = GDTRegister{
+    .limit = gdt.len * @sizeOf(GDTEntry),
+    .base = &gdt[0],
+};
+
+extern fn setGdt(gdtr: *const GDTRegister) void;
+
+pub fn setup() void {
+    tty.write("Setup up gdt ... ", tty.VGAColor.White, tty.VGAColor.Black);
+
+    setGdt(&gdtr);
+
+    tty.write("done", tty.VGAColor.Green, tty.VGAColor.Black);
+}

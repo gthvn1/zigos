@@ -1,5 +1,6 @@
 const tty = @import("tty.zig");
 const x86 = @import("x86.zig");
+const gdt = @import("gdt.zig");
 
 const ALIGN = 1 << 0; // align loaded modules on page boundaries
 const MEMINFO = 1 << 1; // provide memory map
@@ -22,7 +23,9 @@ export fn kmain() callconv(.Naked) noreturn {
     tty.write(banner, tty.VGAColor.Green, tty.VGAColor.Black);
     tty.nextLine();
     tty.nextLine();
-    tty.write("Hello, World!", tty.VGAColor.White, tty.VGAColor.Black);
+    // Before setup up the GDT we must disable interrupts
+    x86.cli();
+    gdt.setup();
 
     // never returned...
     x86.black_hole();
