@@ -1,0 +1,4 @@
+.zig-cache/
+zig-out/
+zigos.iso
+iso/boot/kernel
