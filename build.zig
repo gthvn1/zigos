@@ -1,48 +1,70 @@
 const std = @import("std");
-const Builder = @import("std").build.Builder;
-const Target = @import("std").Target;
-const CrossTarget = @import("std").zig.CrossTarget;
-const Feature = @import("std").Target.Cpu.Feature;
 
-pub fn build(b: *Builder) void {
+pub fn build(b: *std.Build) void {
+    const target = b.resolveTargetQuery(.{
+        .cpu_arch = .x86_64,
+        .os_tag = .freestanding,
+        .abi = .none,
+    });
 
-    const kernel = b.addExecutable("kernel.elf", "src/boot.zig");
+    const kernel = b.addExecutable(.{
+        .name = "kernel",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/kernel.zig"),
+            .target = target,
+        }),
+    });
 
-    const target = CrossTarget{
-        .cpu_arch = Target.Cpu.Arch.i386,
-        .os_tag = Target.Os.Tag.freestanding,
-        .abi = Target.Abi.none
-    };
-    kernel.setTarget(target);
+    kernel.setLinkerScript(b.path("linker.ld"));
+    kernel.pie = false;
 
-    const mode = b.standardReleaseOptions();
-    kernel.setBuildMode(mode);
+    b.installArtifact(kernel);
 
-    kernel.setLinkerScriptPath(.{ .path = "src/linker.ld" });
-    kernel.code_model = .kernel;
-    kernel.install();
+    // Copy the kernel into iso/boot/kernel
+    const cp_kernel = b.addInstallFile(
+        kernel.getEmittedBin(),
+        "iso/boot/kernel",
+    );
 
-    const kernel_step = b.step("kernel", "Build the kernel");
-    kernel_step.dependOn(&kernel.install_step.?.step);
+    cp_kernel.step.dependOn(&kernel.step);
 
-    const iso_dir = b.fmt("{s}/iso", .{b.cache_root});
-    const kernel_path = b.getInstallPath(kernel.install_step.?.dest_dir, kernel.out_filename);
-    const iso_path = b.fmt("{s}/zigos.iso", .{b.exe_dir});
+    // Generate the iso
+    const iso = "zigos.iso";
 
-    const iso_cmd_str = &[_][]const u8{
-        "/bin/sh", "-c",
-        std.mem.concat(b.allocator, u8, &[_][]const u8{
-            "mkdir -p ", iso_dir, "/boot/grub && ",
-            "cp ", kernel_path, " ", iso_dir, "/boot && ",
-            "cp src/grub.cfg ", iso_dir, "/boot/grub && ",
-            "grub2-mkrescue -o ", iso_path, " ", iso_dir
-        }) catch unreachable
-    };
+    const gen_iso = b.addSystemCommand(&.{
+        "grub-mkrescue",
+        "-o",
+        iso,
+        "iso",
+    });
+    gen_iso.step.dependOn(&cp_kernel.step);
 
-    const iso_cmd = b.addSystemCommand(iso_cmd_str);
-    iso_cmd.step.dependOn(kernel_step);
+    // Expose the copy & gen iso as `zig build iso`
+    const iso_step = b.step("iso", "Build a bootable ISO image");
+    iso_step.dependOn(&gen_iso.step);
 
-    const iso_step = b.step("iso", "Build an ISO image");
-    iso_step.dependOn(&iso_cmd.step);
-    b.default_step.dependOn(iso_step);
+    // Run in qemu:
+    //   - using "-nographic" redirect serial to stdio
+    //   - "-boot d" skip BIOS logo
+    const gdb = b.option(bool, "gdb", "Wait for GDB") orelse false;
+
+    const run_qemu = b.addSystemCommand(&.{
+        "qemu-system-x86_64",
+        "-boot",
+        "d",
+        "-cdrom",
+        iso,
+        "-no-reboot",
+        "-nographic",
+    });
+
+    if (gdb) {
+        run_qemu.addArgs(&.{ "-S", "-s" });
+    }
+
+    run_qemu.step.dependOn(&gen_iso.step);
+
+    // Expose as run step
+    const run_step = b.step("run", "Run OS in Qemu");
+    run_step.dependOn(&run_qemu.step);
 }
